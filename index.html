@@ -1766,30 +1766,64 @@
         return pool.length >= 4 ? pool : vocabPool;
       }
 
+      let usedWordsInCycle = new Set();
+      let lastCorrectOptionIdx = -1;
+
+      function fisherYates(arr) {
+        const a = arr.slice();
+        for (let i = a.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+        }
+        return a;
+      }
+
+      function shuffleAvoidingRepeatPos(arr) {
+        const out = fisherYates(arr);
+        if (out.length > 1) {
+          let curIdx = out.findIndex(o => o.isCorrect);
+          if (curIdx === lastCorrectOptionIdx) {
+            const swapIdx = (curIdx + 1 + Math.floor(Math.random() * (out.length - 1))) % out.length;
+            const tmp = out[curIdx]; out[curIdx] = out[swapIdx]; out[swapIdx] = tmp;
+            curIdx = swapIdx;
+          }
+          lastCorrectOptionIdx = curIdx;
+        }
+        return out;
+      }
+
       function buildVocabQuestion() {
         const activePool = getFilteredVocabPool();
-        const target = activePool[Math.floor(Math.random() * activePool.length)] || vocabPool[0];
+        let remaining = activePool.filter(w => !usedWordsInCycle.has(w.word));
+        if (remaining.length === 0) {
+          usedWordsInCycle.clear();
+          remaining = activePool;
+          if (activePool.length > 4) addLog('🔄 本輪單字已全部練習過一次，題庫重新洗牌！', 'text-cyan-300');
+        }
+        const target = remaining[Math.floor(Math.random() * remaining.length)] || vocabPool[0];
+        if (target) usedWordsInCycle.add(target.word);
+
         const dir = quizPrefs.mode === 'mixed' ? (Math.random() < 0.5 ? 'kanjiToKana' : 'kanaToKanji') : quizPrefs.mode;
         const tPos = shortPos(target.pos);
-        const samePos = vocabPool.filter(w => w.word !== target.word && shortPos(w.pos) === tPos).sort(() => Math.random() - 0.5);
-        const rest = vocabPool.filter(w => w.word !== target.word && shortPos(w.pos) !== tPos).sort(() => Math.random() - 0.5);
+        const samePos = fisherYates(vocabPool.filter(w => w.word !== target.word && shortPos(w.pos) === tPos));
+        const rest = fisherYates(vocabPool.filter(w => w.word !== target.word && shortPos(w.pos) !== tPos));
         const distractors = [...samePos, ...rest].slice(0, 3);
 
         if (dir === 'kanjiToKana') {
-          const step1Options = [
+          const step1Options = shuffleAvoidingRepeatPos([
             { wordObj: target, optText: target.reading, isCorrect: true },
             ...distractors.map(d => ({ wordObj: d, optText: d.reading, isCorrect: false }))
-          ].sort(() => Math.random() - 0.5);
-          const step2Options = [
+          ]);
+          const step2Options = shuffleAvoidingRepeatPos([
             { wordObj: target, optText: '【' + shortPos(target.pos) + '】' + target.meaning, isCorrect: true },
             ...distractors.map(d => ({ wordObj: d, optText: '【' + shortPos(d.pos) + '】' + d.meaning, isCorrect: false }))
-          ].sort(() => Math.random() - 0.5);
+          ]);
           return { isGrammar: false, target, dir, step: 1, step1Options, step2Options, optionObjects: step1Options };
         }
-        const optionObjects = [
+        const optionObjects = shuffleAvoidingRepeatPos([
           { wordObj: target, optText: target.word, isCorrect: true },
           ...distractors.map(d => ({ wordObj: d, optText: d.word, isCorrect: false }))
-        ].sort(() => Math.random() - 0.5);
+        ]);
         return { isGrammar: false, target, dir, step: 0, optionObjects };
       }
 
@@ -2673,7 +2707,7 @@
           const b = document.createElement('button'); b.type = 'button'; b.textContent = lbl;
           const active = quizPrefs.scope === k;
           b.className = 'py-1 px-2.5 rounded-lg font-bold border transition ' + (active ? 'bg-amber-700 text-white border-amber-400' : 'bg-stone-950/80 text-stone-300 border-stone-700 hover:bg-stone-800');
-          b.addEventListener('click', () => { quizPrefs.scope = k; saveQuizPrefs(); renderQuizSettings(); });
+          b.addEventListener('click', () => { quizPrefs.scope = k; usedWordsInCycle.clear(); saveQuizPrefs(); renderQuizSettings(); });
           sBox.appendChild(b);
         });
         const matched = getFilteredVocabPool();
